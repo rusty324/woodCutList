@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cut List Calculator</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪚</text></svg>">
+</head>
+<body>
+<header class="site-header">
+  <h1>🪚 Cut List Calculator</h1>
+  <p>Enter the boards your store sells and the pieces you need — get a shopping list and cut plan.</p>
+</header>
+
+<main>
+  <section class="card" id="settingsCard">
+    <h2>Settings</h2>
+    <div class="settings-grid">
+      <label class="cell">
+        <span>Saw kerf (in)</span>
+        <input id="kerfInput" type="text" inputmode="decimal" value="1/8" autocomplete="off" enterkeyhint="next">
+      </label>
+      <label class="toggle">
+        <input id="allowLarger" type="checkbox">
+        <span>Allow cuts from larger stock (e.g. rip pieces from a wider sheet)</span>
+      </label>
+    </div>
+    <p class="hint">Kerf is the wood lost to the saw blade on each cut. Dimensions accept inches as decimals or fractions — <code>48</code>, <code>0.75</code>, <code>3/4</code>, <code>1 1/2</code> — or feet &amp; inches: <code>12'</code>, <code>4' 6"</code>, <code>4'6 1/2"</code>. Leave prices blank to optimize for the fewest boards instead of cost.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Stock boards</h2>
+      <button type="button" class="btn-link" id="loadExample">Load example</button>
+    </div>
+    <p class="hint">Boards available for purchase. Length is required; width, thickness and price are optional.</p>
+    <div class="tbl" id="stockTable">
+      <div class="tbl-head" aria-hidden="true">
+        <span>Length (in) *</span><span>Width (in)</span><span>Thickness (in)</span><span>Price ($)</span><span></span>
+      </div>
+      <div class="tbl-rows" id="stockRows"></div>
+    </div>
+    <button type="button" class="btn-add" id="addStock">+ Add stock board</button>
+  </section>
+
+  <section class="card">
+    <h2>Cuts needed</h2>
+    <p class="hint">The pieces you want to end up with. Length and quantity are required.</p>
+    <div class="tbl" id="cutTable">
+      <div class="tbl-head" aria-hidden="true">
+        <span>Length (in) *</span><span>Width (in)</span><span>Thickness (in)</span><span>Qty *</span><span></span>
+      </div>
+      <div class="tbl-rows" id="cutRows"></div>
+    </div>
+    <button type="button" class="btn-add" id="addCut">+ Add cut</button>
+  </section>
+
+  <div class="msg msg-error" id="errorBox" hidden></div>
+
+  <section class="card" id="results" hidden>
+    <h2>Results</h2>
+    <div class="stats" id="stats"></div>
+    <div class="msg msg-warn" id="warnBox" hidden></div>
+    <h3>Shopping list</h3>
+    <div id="shoppingList"></div>
+    <h3>Cut plan</h3>
+    <div id="cutPlan"></div>
+  </section>
+
+  <p class="footnote">
+    Everything runs in your browser and your entries are saved on this device.
+    <button type="button" class="btn-link" id="clearAll">Clear all</button>
+  </p>
+</main>
+
+<footer class="actionbar">
+  <button type="button" id="calcBtn" class="btn-primary">Calculate cut list</button>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
