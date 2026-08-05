@@ -184,6 +184,182 @@ function loadState() {
   }
 }
 
+/* ---------------- CSV import / export ---------------- */
+
+const CSV_HEADER = ['section', 'length', 'width', 'thickness', 'price', 'qty'];
+
+// dimensions carry inch marks (4' 6"), which are the CSV quote char — so quote properly
+const csvEscape = (v) => {
+  const s = String(v ?? '');
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const toCsv = (rows) => rows.map((r) => r.map(csvEscape).join(',')).join('\r\n') + '\r\n';
+
+// RFC 4180-ish, but tolerant of bare inch marks inside an unquoted field
+function parseCsv(text) {
+  const s = String(text).replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch !== '"') { field += ch; continue; }
+      if (s[i + 1] === '"') { field += '"'; i++; continue; }
+      quoted = false;
+      continue;
+    }
+    if (ch === '"' && field === '') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\r' || ch === '\n') {
+      if (ch === '\r' && s[i + 1] === '\n') i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      continue;
+    }
+    field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}
+
+function buildCsv() {
+  const rows = [CSV_HEADER];
+  for (const r of readRows(stockRows)) {
+    if (rowHasContent(r, ['length', 'width', 'thickness', 'price'])) {
+      rows.push(['stock', r.length, r.width, r.thickness, r.price, '']);
+    }
+  }
+  for (const r of readRows(cutRows)) {
+    if (rowHasContent(r, ['length', 'width', 'thickness'])) {
+      rows.push(['cut', r.length, r.width, r.thickness, '', r.qty]);
+    }
+  }
+  rows.push(['setting', 'kerf', $('kerfInput').value, '', '', '']);
+  rows.push(['setting', 'allowLarger', $('allowLarger').checked ? 'yes' : 'no', '', '', '']);
+  return toCsv(rows);
+}
+
+function exportCsv() {
+  const blob = new Blob([buildCsv()], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cut-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// spreadsheet-friendly column names, so a hand-made list imports too
+const CSV_ALIASES = {
+  section: 'section', type: 'section', kind: 'section', category: 'section',
+  length: 'length', len: 'length', l: 'length', long: 'length',
+  width: 'width', w: 'width', wide: 'width',
+  thickness: 'thickness', thick: 'thickness', t: 'thickness', depth: 'thickness',
+  price: 'price', cost: 'price', each: 'price',
+  qty: 'qty', quantity: 'qty', count: 'qty', pieces: 'qty', num: 'qty',
+};
+
+const normHeader = (h) =>
+  CSV_ALIASES[
+    String(h).toLowerCase().replace(/\(.*?\)/g, '').replace(/[*_"″]/g, '').replace(/\s+/g, ' ').trim()
+  ] || null;
+
+const SECTIONS = { stock: 'stock', board: 'stock', boards: 'stock', cut: 'cut', cuts: 'cut', piece: 'cut', setting: 'setting', settings: 'setting' };
+
+// Accepts our own export, or a plain spreadsheet of cuts/boards with a header row.
+function readCsv(text) {
+  const rows = parseCsv(text);
+  if (!rows.length) return { error: 'That file is empty.' };
+
+  let cols = rows[0].map(normHeader);
+  let data;
+  if (cols.some((c) => c === 'length')) {
+    data = rows.slice(1);
+  } else {
+    // no header row: assume our column order if rows are tagged, else a bare cut list
+    data = rows;
+    cols = SECTIONS[String(rows[0][0]).toLowerCase().trim()]
+      ? CSV_HEADER
+      : ['length', 'width', 'thickness', 'qty'];
+  }
+  const hasSection = cols.includes('section');
+  const fallback = cols.includes('qty') || !cols.includes('price') ? 'cut' : 'stock';
+
+  const stock = [];
+  const cuts = [];
+  const settings = {};
+  let skipped = 0;
+  for (const row of data) {
+    const vals = {};
+    cols.forEach((c, i) => { if (c) vals[c] = String(row[i] ?? '').trim(); });
+    let section = fallback;
+    if (hasSection) {
+      const tag = SECTIONS[String(vals.section ?? '').toLowerCase()];
+      if (!tag) { skipped++; continue; }
+      section = tag;
+    }
+    if (section === 'setting') {
+      if (vals.length) settings[String(vals.length).trim()] = String(vals.width ?? '').trim();
+    } else if (section === 'stock') {
+      stock.push({ length: vals.length ?? '', width: vals.width ?? '', thickness: vals.thickness ?? '', price: vals.price ?? '' });
+    } else {
+      cuts.push({ length: vals.length ?? '', width: vals.width ?? '', thickness: vals.thickness ?? '', qty: vals.qty || '1' });
+    }
+  }
+  // a file of unrelated text would otherwise import as rows of nonsense
+  const usable = [...stock, ...cuts].some((r) => {
+    const len = parseMeasure(r.length);
+    return len != null && !Number.isNaN(len) && len > 0;
+  });
+  if (!usable) {
+    return { error: 'No board or cut lengths found in that file. Expected a header row with at least a “length” column.' };
+  }
+  return { stock, cuts, settings, skipped };
+}
+
+function applyCsv({ stock, cuts, settings }) {
+  stockRows.innerHTML = '';
+  cutRows.innerHTML = '';
+  for (const rec of stock.length ? stock : [{}]) addRow(stockRows, STOCK_COLS, rec);
+  for (const rec of cuts.length ? cuts : [{ qty: '1' }]) addRow(cutRows, CUT_COLS, rec);
+  if (settings.kerf) $('kerfInput').value = settings.kerf;
+  const larger = settings.allowLarger ?? settings.allowlarger;
+  if (larger != null && larger !== '') $('allowLarger').checked = /^(y|yes|true|1|on)$/i.test(larger);
+  saveState();
+}
+
+function importCsv(text) {
+  const res = readCsv(text);
+  const notice = $('noticeBox');
+  if (res.error) {
+    $('errorBox').textContent = res.error;
+    $('errorBox').hidden = false;
+    notice.hidden = true;
+    return;
+  }
+  const current = [
+    ...readRows(stockRows).filter((r) => rowHasContent(r, ['length', 'width', 'thickness', 'price'])),
+    ...readRows(cutRows).filter((r) => rowHasContent(r, ['length', 'width', 'thickness'])),
+  ];
+  if (current.length && !confirm('Replace the current stock boards and cuts with the file?')) return;
+  applyCsv(res);
+  const parts = [
+    `${res.stock.length} stock board${res.stock.length === 1 ? '' : 's'}`,
+    `${res.cuts.length} cut${res.cuts.length === 1 ? '' : 's'}`,
+  ];
+  notice.textContent = `Imported ${parts.join(' and ')}.${res.skipped ? ` ${res.skipped} row${res.skipped === 1 ? '' : 's'} skipped.` : ''}`;
+  notice.hidden = false;
+  $('errorBox').hidden = true;
+  $('results').hidden = true;
+}
+
 /* ---------------- validation ---------------- */
 
 function collectInputs() {
@@ -261,11 +437,13 @@ function dimCompatible(cutDim, stockDim, allowLarger) {
   return allowLarger ? cutDim <= stockDim + EPS : Math.abs(cutDim - stockDim) <= EPS;
 }
 
+// Thickness always has to match: you buy 3/4″ stock for a 3/4″ piece, you don't
+// plane a 1.5″ board down. "Allow larger" only ever means ripping a board narrower.
 function pieceFitsType(piece, type, allowLarger) {
   return (
     piece.length <= type.length + EPS &&
     dimCompatible(piece.width, type.width, allowLarger) &&
-    dimCompatible(piece.thickness, type.thickness, allowLarger)
+    dimCompatible(piece.thickness, type.thickness, false)
   );
 }
 
@@ -349,16 +527,20 @@ function solve(stock, cuts, kerf, allowLarger) {
   const misfits = [];
   for (const c of cuts) {
     const p = { length: c.length, width: c.width, thickness: c.thickness };
-    if (!stock.some((t) => pieceFitsType(p, t, allowLarger))) {
-      const dimOk = stock.some(
-        (t) => dimCompatible(c.width, t.width, allowLarger) && dimCompatible(c.thickness, t.thickness, allowLarger)
-      );
-      misfits.push(
-        `Cut row ${c.row} (${describeDims(c)}) fits no stock board — ` +
-          (dimOk ? 'it is longer than every matching board.' : 'no board matches its width/thickness.' +
-            (allowLarger ? '' : ' Tip: enable “allow cuts from larger stock” if ripping down is OK.'))
-      );
+    if (stock.some((t) => pieceFitsType(p, t, allowLarger))) continue;
+    const thickOk = stock.filter((t) => dimCompatible(c.thickness, t.thickness, false));
+    const widthOk = thickOk.filter((t) => dimCompatible(c.width, t.width, allowLarger));
+    let why;
+    if (!thickOk.length) {
+      why = 'no board has a matching thickness.';
+    } else if (!widthOk.length) {
+      why = allowLarger
+        ? 'no board of that thickness is wide enough.'
+        : 'no board matches its width. Tip: enable “allow cuts from wider stock” if ripping down is OK.';
+    } else {
+      why = 'it is longer than every matching board.';
     }
+    misfits.push(`Cut row ${c.row} (${describeDims(c)}) fits no stock board — ${why}`);
   }
   if (misfits.length) return { errors: misfits };
 
@@ -384,6 +566,22 @@ function solve(stock, cuts, kerf, allowLarger) {
 
 /* ---------------- rendering ---------------- */
 
+// Give each scaled board a height matching its length:width ratio, clamped so a
+// 12′ 1×6 stays readable and a plywood sheet doesn't fill the screen.
+// the max is set so ordinary sheet goods (a 2:1 4×8 sheet, say) come out exactly
+// to scale at normal page widths; only near-square stock gets squashed
+const BAR_MIN_H = 42;
+const BAR_MAX_H = 360;
+
+function sizeBars() {
+  for (const bar of document.querySelectorAll('.bar-scaled')) {
+    const ratio = parseFloat(bar.dataset.ratio);
+    if (!(ratio > 0)) continue;
+    const h = Math.min(BAR_MAX_H, Math.max(BAR_MIN_H, bar.clientWidth / ratio));
+    bar.style.height = `${Math.round(h)}px`;
+  }
+}
+
 function renderResults(bins, kerf, pricedMode) {
   const results = $('results');
   results.hidden = false;
@@ -395,11 +593,18 @@ function renderResults(bins, kerf, pricedMode) {
   const totalLeftover = bins.reduce((s, b) => s + (b.stock.length - b.used), 0);
   const totalPieces = bins.reduce((s, b) => s + b.cuts.length, 0);
 
+  // when every board and piece has a width, measure utilization by area so rip
+  // waste counts against it; otherwise fall back to length only
+  const haveWidths = bins.every((b) => b.stock.width != null && b.cuts.every((c) => c.width != null));
+  const usedArea = bins.reduce((s, b) => s + b.cuts.reduce((x, c) => x + c.length * c.width, 0), 0);
+  const stockArea = bins.reduce((s, b) => s + b.stock.length * b.stock.width, 0);
+  const utilization = haveWidths ? usedArea / stockArea : totalCutLen / totalStockLen;
+
   const stats = pricedMode ? [['Total cost', money(totalCost)]] : [];
   stats.push(
     ['Boards to buy', String(bins.length)],
     ['Pieces cut', String(totalPieces)],
-    ['Utilization', `${Math.round((totalCutLen / totalStockLen) * 100)}%`],
+    [haveWidths ? 'Utilization (area)' : 'Utilization', `${Math.round(utilization * 100)}%`],
     ['Leftover', `${fmt(totalLeftover)}″`]
   );
   $('stats').innerHTML = stats
@@ -433,13 +638,13 @@ function renderResults(bins, kerf, pricedMode) {
       `<tbody>${rows}</tbody><tfoot><tr><td>Total</td><td></td><td></td><td>${money(totalCost)}</td></tr></tfoot></table>`
     : `<table class="shop-table"><thead><tr><th>Board</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>`;
 
-  // cut plan: group identical board layouts
+  // cut plan: group identical board layouts (widths included — they change the drawing)
   const layouts = new Map();
   for (const b of bins) {
     const key =
       JSON.stringify([b.stock.length, b.stock.width, b.stock.thickness, b.stock.price]) +
       '|' +
-      b.cuts.map((c) => c.length).sort((x, y) => x - y).join(',');
+      b.cuts.map((c) => `${c.length}x${c.width ?? '?'}`).sort().join(',');
     const entry = layouts.get(key) || { bin: b, count: 0 };
     entry.count++;
     layouts.set(key, entry);
@@ -447,12 +652,23 @@ function renderResults(bins, kerf, pricedMode) {
 
   $('cutPlan').innerHTML = [...layouts.values()]
     .sort((a, b) => b.bin.stock.length - a.bin.stock.length || b.bin.used - a.bin.used)
-    .map(({ bin, count }, i) => {
+    .map(({ bin, count }) => {
+      const stockW = bin.stock.width;
+      const ripOf = (c) => (stockW != null && c.width != null ? stockW - c.width : 0);
       const segs = [];
       bin.cuts.forEach((c, ci) => {
         if (ci > 0 && kerf > 0) segs.push(`<div class="seg seg-kerf" title="kerf ${fmt(kerf)}″"></div>`);
+        const rip = ripOf(c);
+        const ripped = rip > EPS;
+        const label = ripped ? `${fmt(c.length)}″ × ${fmt(c.width)}″` : `${fmt(c.length)}″`;
+        const title = ripped
+          ? `${fmt(c.length)}″ × ${fmt(c.width)}″ cut — rip ${fmt(rip)}″ off the width`
+          : `${fmt(c.length)}″ cut`;
         segs.push(
-          `<div class="seg seg-cut" style="flex-grow:${c.length}" title="${fmt(c.length)}″ cut">${fmt(c.length)}″</div>`
+          `<div class="seg seg-cut" style="flex-grow:${c.length}" title="${title}">` +
+            `<div class="piece" style="flex-grow:${ripped ? c.width : 1}">${label}</div>` +
+            (ripped ? `<div class="rip" style="flex-grow:${rip}" title="rip waste ${fmt(rip)}″"></div>` : '') +
+            `</div>`
         );
       });
       const leftover = bin.stock.length - bin.used;
@@ -461,22 +677,38 @@ function renderResults(bins, kerf, pricedMode) {
           `<div class="seg seg-left" style="flex-grow:${leftover}" title="leftover ${fmt(leftover)}″">${fmt(leftover)}″</div>`
         );
       }
-      const cutList = bin.cuts.map((c) => `${fmt(c.length)}″`).join(' + ');
+      // draw the board to scale (length × width) so a sheet doesn't look like a 1×6.
+      // the ratio is applied by sizeBars() rather than CSS aspect-ratio, which would
+      // feed the clamped height back into the width and overflow the card.
+      const barAttrs =
+        stockW > 0
+          ? ` class="bar bar-scaled" data-ratio="${bin.stock.length / stockW}"`
+          : ` class="bar"`;
+      const cutList = bin.cuts
+        .map((c) => (ripOf(c) > EPS ? `${fmt(c.length)}″ × ${fmt(c.width)}″` : `${fmt(c.length)}″`))
+        .join(' + ');
+      const rips = bin.cuts.filter((c) => ripOf(c) > EPS).length;
+      const ripNote = rips
+        ? ` — ${rips === bin.cuts.length ? 'every piece' : `${rips} piece${rips > 1 ? 's' : ''}`} rips narrower than the board`
+        : '';
       return (
         `<div class="board">` +
         `<div class="board-title">${describeDims(bin.stock)}${count > 1 ? ` <span class="mult">× ${count}</span>` : ''}</div>` +
-        `<div class="bar">${segs.join('')}</div>` +
-        `<div class="board-caption">Cuts: ${cutList} — leftover ${fmt(Math.max(0, leftover))}″</div>` +
+        `<div${barAttrs}>${segs.join('')}</div>` +
+        `<div class="board-caption">Cuts: ${cutList} — leftover ${fmt(Math.max(0, leftover))}″ of length${ripNote}</div>` +
         `</div>`
       );
     })
     .join('');
+
+  sizeBars();
 }
 
 /* ---------------- wiring ---------------- */
 
 function calculate() {
   document.querySelectorAll('input.invalid').forEach((el) => el.classList.remove('invalid'));
+  $('noticeBox').hidden = true;
   const errorBox = $('errorBox');
   const { errors, stock, cuts, kerf } = collectInputs();
   if (errors.length) {
@@ -508,6 +740,22 @@ $('addCut').addEventListener('click', () => { addRow(cutRows, CUT_COLS, { qty: '
 $('kerfInput').addEventListener('input', () => { $('kerfInput').classList.remove('invalid'); saveState(); });
 $('kerfInput').addEventListener('keydown', handleEnterKey);
 $('allowLarger').addEventListener('change', saveState);
+addEventListener('resize', sizeBars);
+
+$('exportCsv').addEventListener('click', exportCsv);
+$('importCsv').addEventListener('click', () => $('csvFile').click());
+$('csvFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = ''; // so re-picking the same file fires again
+  if (!file) return;
+  file
+    .text()
+    .then(importCsv)
+    .catch(() => {
+      $('errorBox').textContent = "Couldn't read that file.";
+      $('errorBox').hidden = false;
+    });
+});
 
 $('clearAll').addEventListener('click', () => {
   if (!confirm('Clear all stock, cuts and settings?')) return;
@@ -519,6 +767,7 @@ $('clearAll').addEventListener('click', () => {
   $('allowLarger').checked = false;
   $('results').hidden = true;
   $('errorBox').hidden = true;
+  $('noticeBox').hidden = true;
   saveState();
 });
 

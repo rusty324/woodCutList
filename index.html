@@ -27,10 +27,10 @@
       </label>
       <label class="toggle">
         <input id="allowLarger" type="checkbox">
-        <span>Allow cuts from larger stock (e.g. rip pieces from a wider sheet)</span>
+        <span>Allow cuts from wider stock (e.g. rip pieces from a wider board or sheet)</span>
       </label>
     </div>
-    <p class="hint">Kerf is the wood lost to the saw blade on each cut. Dimensions accept inches as decimals or fractions — <code>48</code>, <code>0.75</code>, <code>3/4</code>, <code>1 1/2</code> — or feet &amp; inches: <code>12'</code>, <code>4' 6"</code>, <code>4'6 1/2"</code>. Leave prices blank to optimize for the fewest boards instead of cost.</p>
+    <p class="hint">Kerf is the wood lost to the saw blade on each cut. Thickness always has to match exactly — a 3/4″ piece is only ever cut from 3/4″ stock. Dimensions accept inches as decimals or fractions — <code>48</code>, <code>0.75</code>, <code>3/4</code>, <code>1 1/2</code> — or feet &amp; inches: <code>12'</code>, <code>4' 6"</code>, <code>4'6 1/2"</code>. Leave prices blank to optimize for the fewest boards instead of cost.</p>
   </section>
 
   <section class="card">
@@ -61,6 +61,7 @@
   </section>
 
   <div class="msg msg-error" id="errorBox" hidden></div>
+  <div class="msg msg-ok" id="noticeBox" hidden></div>
 
   <section class="card" id="results" hidden>
     <h2>Results</h2>
@@ -69,12 +70,18 @@
     <h3>Shopping list</h3>
     <div id="shoppingList"></div>
     <h3>Cut plan</h3>
+    <p class="hint">Each board is drawn to scale. Pieces are laid out along the length only — a hatched strip above a piece is width you rip off and discard, not a place for another cut.</p>
     <div id="cutPlan"></div>
   </section>
 
   <p class="footnote">
     Everything runs in your browser and your entries are saved on this device.
-    <button type="button" class="btn-link" id="clearAll">Clear all</button>
+    <span class="footnote-actions">
+      <button type="button" class="btn-link" id="exportCsv">Export CSV</button>
+      <button type="button" class="btn-link" id="importCsv">Import CSV</button>
+      <button type="button" class="btn-link" id="clearAll">Clear all</button>
+    </span>
+    <input type="file" id="csvFile" accept=".csv,text/csv,text/plain" hidden>
   </p>
 </main>
 
