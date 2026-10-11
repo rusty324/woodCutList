@@ -4,19 +4,27 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Cut List Calculator</title>
+<title>Cut List &amp; Deck Planner</title>
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪚</text></svg>">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="Cut List Calculator">
+<meta name="apple-mobile-web-app-title" content="Wood Tools">
 <meta name="apple-mobile-web-app-capable" content="yes">
 </head>
 <body>
 <header class="site-header">
-  <h1>🪚 Cut List Calculator</h1>
-  <p>Enter the boards your store sells and the pieces you need — get a shopping list and cut plan.</p>
+  <h1>🪚 Cut List &amp; Deck Planner</h1>
+  <p>Two woodworking calculators that run entirely in your browser.</p>
 </header>
 
+<nav class="tabs" role="tablist" aria-label="Tools">
+  <button type="button" class="tab" role="tab" id="tabCuts" aria-controls="cutsPanel" aria-selected="true">Cut list</button>
+  <button type="button" class="tab" role="tab" id="tabDeck" aria-controls="deckPanel" aria-selected="false">Deck planner</button>
+</nav>
+
+<div id="cutsPanel" role="tabpanel" aria-labelledby="tabCuts">
+<main id="cutsMain">
+  <p class="tool-intro">Enter the boards your store sells and the pieces you need — get a shopping list and cut plan.</p>
 <main>
   <section class="card" id="settingsCard">
     <h2>Settings</h2>
@@ -88,7 +96,105 @@
 <footer class="actionbar">
   <button type="button" id="calcBtn" class="btn-primary">Calculate cut list</button>
 </footer>
+</div>
+
+<div id="deckPanel" role="tabpanel" aria-labelledby="tabDeck" hidden>
+<main id="deckMain">
+  <p class="tool-intro">Draw your deck, add joists, choose your boards — get a board count, cut list, and a layout drawn on each area.</p>
+
+  <section class="card">
+    <h2>Deck boards</h2>
+    <div class="settings-grid">
+      <label class="cell"><span>Board width (in)</span><input id="dBoardW" type="text" inputmode="decimal" value="5.5" autocomplete="off"></label>
+      <label class="cell"><span>Gap between boards (in)</span><input id="dGap" type="text" inputmode="decimal" value="1/8" autocomplete="off"></label>
+      <label class="cell"><span>Saw kerf (in)</span><input id="dKerf" type="text" inputmode="decimal" value="1/8" autocomplete="off"></label>
+      <label class="cell"><span>Extra to buy (%)</span><input id="dWaste" type="text" inputmode="numeric" value="10" autocomplete="off"></label>
+    </div>
+    <p class="hint">Gap also applies between board ends and between boards and the edge boards. Thickness doesn't affect the count.</p>
+
+    <h3>Board lengths you can buy</h3>
+    <p class="hint">One length, or the whole list your store carries. Prices are optional; if every length has one, the cheapest mix is chosen.</p>
+    <div class="tbl tbl-stock2" id="dStockTable">
+      <div class="tbl-head" aria-hidden="true"><span>Length *</span><span>Price ($)</span><span></span></div>
+      <div class="tbl-rows" id="dStockRows"></div>
+    </div>
+    <button type="button" class="btn-add" id="dAddStock">+ Add length</button>
+  </section>
+
+  <section class="card" id="dLayoutCard">
+    <div class="card-head">
+      <h2>Deck layout</h2>
+      <button type="button" class="btn-link" id="dFit">Fit to view</button>
+    </div>
+    <div class="chips" id="dChips"></div>
+    <div class="quick-rect">
+      <span>Quick rectangle</span>
+      <input id="dRectW" type="text" inputmode="decimal" placeholder="Width, e.g. 16'" autocomplete="off" aria-label="Rectangle width">
+      <span>×</span>
+      <input id="dRectD" type="text" inputmode="decimal" placeholder="Depth, e.g. 12'" autocomplete="off" aria-label="Rectangle depth">
+      <button type="button" class="tool" id="dRectAdd">Add</button>
+    </div>
+
+    <div class="toolbar" role="toolbar" aria-label="Drawing tools">
+      <button type="button" class="tool" data-tool="select" aria-pressed="true">Select / move</button>
+      <button type="button" class="tool" data-tool="area" aria-pressed="false">Draw area</button>
+      <button type="button" class="tool" data-tool="joist" aria-pressed="false">Draw joist</button>
+      <button type="button" class="tool" data-tool="corner" aria-pressed="false">Add corner</button>
+      <label class="snap">Snap
+        <select id="dSnap">
+          <option value="0">off</option>
+          <option value="1">1″</option>
+          <option value="3">3″</option>
+          <option value="6" selected>6″</option>
+          <option value="12">1′</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" id="dHint"></p>
+    <div class="canvas-wrap">
+      <svg id="dSvg" class="deck-svg" xmlns="http://www.w3.org/2000/svg" aria-label="Deck drawing"><g id="dLayers"></g></svg>
+      <div class="zoom">
+        <button type="button" id="dZoomIn" aria-label="Zoom in">+</button>
+        <button type="button" id="dZoomOut" aria-label="Zoom out">−</button>
+      </div>
+    </div>
+    <div class="actions" id="dActions"></div>
+    <div class="legend" id="dLegend" hidden></div>
+    <div class="piece-info" id="dPieceInfo" hidden></div>
+  </section>
+
+  <section class="card" id="dAreaCard" hidden></section>
+
+  <div class="msg msg-error" id="dError" hidden></div>
+
+  <section class="card" id="dResults" hidden>
+    <h2>Deck results</h2>
+    <div class="stats" id="dStats"></div>
+    <div class="msg msg-warn" id="dWarn" hidden></div>
+    <h3>Shopping list</h3>
+    <div id="dShopping"></div>
+    <h3>Cut plan</h3>
+    <p class="hint">Each bar is one board you buy. Pieces are labelled to match the drawing above — the same colour means the same board.</p>
+    <div id="dCutPlan"></div>
+    <details class="pieces">
+      <summary>All pieces</summary>
+      <div id="dPieces"></div>
+    </details>
+  </section>
+
+  <p class="footnote">
+    Everything runs in your browser and is saved on this device. This is a materials estimate, not a structural design.
+    <span class="footnote-actions"><button type="button" class="btn-link" id="dClear">Clear deck</button></span>
+  </p>
+</main>
+
+<footer class="actionbar">
+  <button type="button" id="dCalc" class="btn-primary">Calculate deck boards</button>
+</footer>
+</div>
 
 <script src="app.js"></script>
+<script src="deck-engine.js"></script>
+<script src="deck.js"></script>
 </body>
 </html>
