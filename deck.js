@@ -835,7 +835,7 @@ $('dChips').addEventListener('click', (e) => {
 
 $('dRectAdd').addEventListener('click', () => {
   const w = mm($('dRectW').value), d = mm($('dRectD').value);
-  if (!(w > 0) || !(d > 0)) { flash("Enter the rectangle's width and depth, e.g. 16' and 12'."); return; }
+  if (!(w > 0) || !(d > 0)) { flash("Enter the rectangle's width and depth in inches, or in feet with a ′ — e.g. 192 and 144, or 16' and 12'."); return; }
   const [x0, y0, x1] = bounds();
   const ox = state.footprints.length ? x1 + 24 : 0;
   const oy = state.footprints.length ? y0 : 0;
