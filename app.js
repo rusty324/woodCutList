@@ -139,7 +139,7 @@ const rowHasContent = (rec, keys) => keys.some((k) => String(rec[k]).trim() !== 
 function handleEnterKey(e) {
   if (e.key !== 'Enter') return;
   e.preventDefault();
-  const inputs = [...document.querySelectorAll('main input[type="text"]')];
+  const inputs = [...document.querySelectorAll('#cutsMain input[type="text"]')];
   const next = inputs.slice(inputs.indexOf(e.target) + 1).find((el) => !el.value.trim());
   if (next) {
     next.focus();
@@ -780,6 +780,9 @@ $('loadExample').addEventListener('click', () => {
   addRow(cutRows, CUT_COLS, { length: '60', width: '6', thickness: '1.5', qty: '3' });
   saveState();
 });
+
+// shared with the deck planner (deck.js)
+window.CutUtil = { parseMeasure, parsePrice, fmt };
 
 loadState();
 })();
