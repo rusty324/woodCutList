@@ -78,8 +78,8 @@ cheapest mix is chosen. An "extra to buy" percentage covers mistakes and culls.
 parallel, perpendicular, 45° diagonal, or any value — and rows can start from
 either side.
 
-**Results.** A shopping list, one cut bar per purchased board, and a table of
-every piece. The layout is drawn on the footprints: boards are labelled and
+**Results.** A shopping list, a cut bar for each distinct board (boards cut
+the same way share one), and a table of every piece. The layout is drawn on the footprints: boards are labelled and
 coloured by the stock board they come from, so you can see how offcuts are
 reused. Tap a board to see everything cut from the same stock board. Angled
 and notched ends are counted at full length, so diagonal layouts are a
@@ -87,3 +87,23 @@ slightly conservative estimate.
 
 The layout maths lives in `deck-engine.js` (no DOM, usable from Node) and the
 drawing UI in `deck.js`.
+
+After calculating, the drawing shows the layout; press **Edit layout** (or pick
+a tool) to go back to changing the deck. A deck can be saved to a file and
+opened again — on another device, say — from the links under the results.
+Over the drawing, scrolling moves the page; pinch, or Ctrl + scroll, zooms.
+
+## Offline
+
+`sw.js` keeps a copy of the page as it is fetched and serves it when there is
+no connection. It is network-first, so a new deploy is picked up on the next
+online visit with nothing to clear.
+
+## Tests
+
+```
+node --test tests/engine.test.js   # the deck engine, in Node, no browser
+node tests/ui.test.mjs             # the page in Chromium (needs `playwright`)
+```
+
+Both run on every push (`.github/workflows/tests.yml`).

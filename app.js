@@ -3,6 +3,7 @@
 
 const STORAGE_KEY = 'cutlist-calc-v1';
 const EPS = 1e-6;
+const MAX_PIECES = 5000;
 
 const $ = (id) => document.getElementById(id);
 const stockRows = $('stockRows');
@@ -54,6 +55,8 @@ function parseQty(raw) {
 }
 
 const fmt = (n) => String(Math.round(n * 1000) / 1000);
+// Today in local time: toISOString() is UTC, so an evening export was dated tomorrow.
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const money = (n) => '$' + n.toFixed(2);
 
 function describeDims(item) {
@@ -249,7 +252,7 @@ function exportCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `cut-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `cut-list-${localDate()}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -422,6 +425,10 @@ function collectInputs() {
     }
     if (!item.bad) cuts.push(item);
   });
+
+  // Each piece is placed individually; a stray extra zero in Qty froze the tab.
+  const totalPieces = cuts.reduce((n, c) => n + c.qty, 0);
+  if (totalPieces > MAX_PIECES) errors.push(`That is ${totalPieces.toLocaleString()} pieces; the limit is ${MAX_PIECES.toLocaleString()}. Check the quantities.`);
 
   if (!errors.length) {
     if (!stock.length) errors.push('Add at least one stock board (length is required).');
@@ -772,6 +779,15 @@ $('clearAll').addEventListener('click', () => {
 });
 
 $('loadExample').addEventListener('click', () => {
+  // Like Clear all and Import: never replace what was typed without asking.
+  const inUse = [
+    ...readRows(stockRows).filter((r) => rowHasContent(r, ['length', 'width', 'thickness', 'price'])),
+    ...readRows(cutRows).filter((r) => rowHasContent(r, ['length', 'width', 'thickness'])),
+  ];
+  if (inUse.length && !confirm('Replace the current stock boards and cuts with the example?')) return;
+  $('results').hidden = true;
+  $('errorBox').hidden = true;
+  $('noticeBox').hidden = true;
   stockRows.innerHTML = '';
   cutRows.innerHTML = '';
   addRow(stockRows, STOCK_COLS, { length: '144', width: '6', thickness: '1.5', price: '12.99' });
@@ -782,7 +798,16 @@ $('loadExample').addEventListener('click', () => {
 });
 
 // shared with the deck planner (deck.js)
-window.CutUtil = { parseMeasure, parsePrice, fmt };
+window.CutUtil = { parseMeasure, parsePrice, fmt, localDate };
+
+// Offline start (sw.js): the page and its three scripts, kept as fetched.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => { /* http or private mode */ });
+  navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({
+    type: 'precache',
+    urls: [location.href.split('#')[0], ...performance.getEntriesByType('resource').map((e) => e.name)],
+  })).catch(() => {});
+}
 
 loadState();
 })();

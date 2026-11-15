@@ -416,3 +416,8 @@ select.field { min-height: 44px; width: 100%; font-size: 1rem; color: var(--text
 .bar .seg-cut.c4 .piece { background: var(--pc4); } .bar .seg-cut.c5 .piece { background: var(--pc5); }
 .quick-rect { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 0.85rem; color: var(--muted); }
 .quick-rect input { flex: 1 1 110px; max-width: 160px; }
+
+/* joists: one line until opened — sixteen rows of "1.5" pushed the results off the screen */
+.joist-details { margin: 8px 0 0; }
+.joist-details > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 6px 0; }
+.board-caption .btn-link { margin-right: 10px; font-size: inherit; }

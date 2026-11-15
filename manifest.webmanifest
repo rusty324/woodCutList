@@ -1,0 +1,13 @@
+{
+  "name": "Cut List & Deck Planner",
+  "short_name": "Wood Tools",
+  "description": "A cut-list calculator and a deck board planner that run in the browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f1ec",
+  "theme_color": "#a05a2c",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "128x128", "type": "image/png", "purpose": "any" }
+  ]
+}

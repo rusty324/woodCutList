@@ -572,6 +572,12 @@ function solve(model) {
       if (thin) warnings.push(`${fp.name}: a ${thin.width}″ joist is too narrow to support two board ends with a ${S.gap}″ gap.`);
     }
   }
+  for (const fp of prep.fps) {
+    const last = fp.rows[fp.rows.length - 1];
+    if (fp.rows.length > 1 && last && last.width < 1) {
+      warnings.push(`${fp.name}: the last row of boards is only ${Math.round(last.width * 100) / 100}″ wide. Adjust the gap or the area's size, or start the rows from the opposite side, to avoid ripping a sliver.`);
+    }
+  }
   if (!priced && stock.some((s) => s.price != null)) {
     warnings.push('Only some board lengths have prices, so the layout was optimised for total length instead of cost.');
   }
