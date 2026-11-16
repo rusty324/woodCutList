@@ -462,7 +462,17 @@ function hitTest(w) {
 
 /* ---------------- editing operations ---------------- */
 
+const HINTS = {
+  select: 'Drag corners or joist ends to reshape, or drag an area to move it. Tap an area to edit its settings. Drag the background to pan; pinch (or Ctrl + scroll) to zoom.',
+  area: 'Tap to place each corner (snaps to the grid and to existing corners). Tap the first corner, or press Finish, to close the shape.',
+  joist: "Tap where the joist starts, then where it ends. Joists snap to the selected area's edges. For even spacing, use “Generate joists” below.",
+  corner: 'Tap an edge of the selected area to add a corner there.',
+  results: 'Showing the board layout: tap a board to see its cuts, drag to pan. Press “Edit layout”, or pick a tool, to change the deck.',
+};
+function updateHint() { $('dHint').textContent = results ? HINTS.results : HINTS[tool]; }
+
 function touch() {
+  const had = !!results;
   results = null;
   selBin = null;
   $('dResults').hidden = true;
@@ -471,6 +481,7 @@ function touch() {
   $('dPieceInfo').hidden = true;
   save();
   scheduleDraw();
+  if (had) { updateHint(); renderActions(); }
 }
 
 let flashTimer = null;
@@ -562,15 +573,13 @@ let gesture = null;
 const TAP_PX = 6;
 
 function setTool(t) {
+  // Picking a tool means "I want to edit": leave the results view, which
+  // otherwise swallowed every drag and tap while the tools looked live.
+  if (results) touch();
   tool = t;
   drawing = []; joistStart = null; hover = null;
   document.querySelectorAll('#deckMain .tool[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
-  $('dHint').textContent = {
-    select: 'Drag corners or joist ends to reshape, or drag an area to move it. Tap an area to edit its settings. Drag the background to pan; pinch or scroll to zoom.',
-    area: 'Tap to place each corner (snaps to the grid and to existing corners). Tap the first corner, or press Finish, to close the shape.',
-    joist: "Tap where the joist starts, then where it ends. Joists snap to the selected area's edges. For even spacing, use “Generate joists” below.",
-    corner: 'Tap an edge of the selected area to add a corner there.',
-  }[t];
+  updateHint();
   renderActions();
   scheduleDraw();
 }
@@ -582,6 +591,8 @@ svg.addEventListener('pointerdown', (e) => {
   svg.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, [e.clientX, e.clientY]);
   if (pointers.size === 2) {
+    // A second finger turns a drag into a pinch; what was dragged so far stays, saved.
+    if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'pinch') { touch(); renderAreaCard(); }
     const [a, b] = [...pointers.values()];
     gesture = { type: 'pinch', d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s0: view.s };
     return;
@@ -728,6 +739,10 @@ svg.addEventListener('pointerup', endPointer);
 svg.addEventListener('pointercancel', endPointer);
 svg.addEventListener('pointerleave', () => { if (!gesture) { hover = null; if (drawing.length || joistStart) scheduleDraw(); } });
 svg.addEventListener('wheel', (e) => {
+  // Plain scrolling belongs to the page: a drawing that fills the screen
+  // otherwise trapped it. Ctrl/Cmd + scroll zooms, which is also what a
+  // trackpad pinch sends.
+  if (!e.ctrlKey && !e.metaKey) return;
   e.preventDefault();
   zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
 }, { passive: false });
@@ -802,6 +817,7 @@ function renderActions() {
   } else if (tool === 'joist' && joistStart) {
     btns.push(['cancel', 'Cancel joist']);
   }
+  if (results) btns.push(['edit', 'Edit layout']);
   if (sel && !results) {
     btns.push(['delsel', sel.type === 'vertex' ? 'Delete selected corner' : 'Delete selected joist', false, 'danger']);
   }
@@ -815,6 +831,7 @@ $('dActions').addEventListener('click', (e) => {
   else if (a === 'undo') { drawing.pop(); renderActions(); scheduleDraw(); }
   else if (a === 'cancel') { drawing = []; joistStart = null; renderActions(); scheduleDraw(); }
   else if (a === 'delsel') deleteSelected();
+  else if (a === 'edit') touch();
 });
 
 function renderChips() {
@@ -890,7 +907,9 @@ function renderAreaCard() {
     `</div>` +
     `<div class="actions"><button type="button" data-act="gen-joists">Generate joists</button>` +
     (fp.joists.length ? `<button type="button" data-act="clear-joists" class="danger">Remove all joists</button>` : '') + `</div>` +
-    `<div class="joist-list">${joists}</div>`;
+    (fp.joists.length
+      ? `<details class="joist-details"${fp.joists.length <= 4 ? ' open' : ''}><summary>${fp.joists.length} joist${fp.joists.length === 1 ? '' : 's'}: widths and removal</summary><div class="joist-list">${joists}</div></details>`
+      : '');
 }
 
 const areaCard = $('dAreaCard');
@@ -923,7 +942,17 @@ areaCard.addEventListener('change', (e) => {
     const a = fp.pts[i], j = (i + 1) % fp.pts.length, b = fp.pts[j];
     const cur = dist(a, b);
     const ux = cur > 1e-9 ? (b[0] - a[0]) / cur : 1, uy = cur > 1e-9 ? (b[1] - a[1]) / cur : 0;
-    fp.pts[j] = [a[0] + ux * len, a[1] + uy * len];
+    const dx = a[0] + ux * len - b[0], dy = a[1] + uy * len - b[1];
+    fp.pts[j] = [b[0] + dx, b[1] + dy];
+    // Moving just that corner turned a rectangle into a trapezoid. When the
+    // edge two along runs parallel to this one (any rectangle, any L or U
+    // shape), the next corner moves with it: the far edge grows instead and
+    // every angle is kept.
+    const n = fp.pts.length, k = (j + 1) % n, m = (j + 2) % n;
+    if (n >= 4 && k !== i) {
+      const ex = fp.pts[m][0] - fp.pts[k][0], ey = fp.pts[m][1] - fp.pts[k][1], el = Math.hypot(ex, ey);
+      if (el > 1e-9 && Math.abs(ux * ey - uy * ex) / el < 1e-3) fp.pts[k] = [fp.pts[k][0] + dx, fp.pts[k][1] + dy];
+    }
     renderAreaCard();
     touch();
   }
@@ -939,6 +968,7 @@ areaCard.addEventListener('click', (e) => {
   else if (b.dataset.act === 'gen-joists') {
     const spacing = mm(state.settings.joistSpacing), width = mm(state.settings.joistWidth);
     if (!(spacing > 0) || !(width > 0)) { flash('Enter a joist spacing and width first.'); return; }
+    if (spacing < 1) { flash('Joist spacing must be at least 1″.'); return; }
     if (!E.isSimple(fp.pts)) { flash('Fix the area outline first — its edges cross.'); return; }
     if (fp.joists.length && !confirm('Replace this area’s existing joists?')) return;
     const model = buildModel().model.footprints[fpIndex(fp)];
@@ -971,6 +1001,7 @@ function calculate() {
   selBin = null;
   sel = null;
   renderActions();
+  updateHint();
   renderResults(res, model);
   draw();
   $('dLayoutCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -986,11 +1017,12 @@ function renderResults(res, model) {
 
   const byLen = new Map();
   for (const b of res.bins) {
-    const e = byLen.get(b.stock.length) || { stock: b.stock, qty: 0 };
+    const key = `${b.stock.length}|${b.stock.price ?? ''}`;
+    const e = byLen.get(key) || { stock: b.stock, qty: 0 };
     e.qty++;
-    byLen.set(b.stock.length, e);
+    byLen.set(key, e);
   }
-  const lines = [...byLen.values()].sort((a, b) => b.stock.length - a.stock.length);
+  const lines = [...byLen.values()].sort((a, b) => b.stock.length - a.stock.length || (a.stock.price ?? 0) - (b.stock.price ?? 0));
   const buyQty = (q) => (res.waste > 0 ? Math.ceil(q * extra - 1e-9) : q);
   const costBuy = res.priced ? lines.reduce((a, l) => a + buyQty(l.qty) * l.stock.price, 0) : 0;
 
@@ -1023,18 +1055,33 @@ function renderResults(res, model) {
     : '';
   $('dShopping').innerHTML = `<table class="shop-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table>`;
 
-  // one bar per purchased board
-  $('dCutPlan').innerHTML = res.bins.map((b, bi) => {
-    const c = bi % 6;
+  // One bar per distinct board: 28 boards for a plain deck are mostly the
+  // same few cuts, and a bar each made the page thousands of pixels long.
+  // Boards cut identically share a bar, which lists their numbers and pieces.
+  const groups = new Map();
+  res.bins.forEach((b, bi) => {
+    const key = `${b.stock.length}|${b.cuts.map((pi) => r2(res.pieces[pi].length)).join(',')}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(bi);
+  });
+  $('dCutPlan').innerHTML = [...groups.values()].map((bis) => {
+    const b = res.bins[bis[0]];
+    const c = bis[0] % 6;
+    const many = bis.length > 1;
     const segs = [];
     b.cuts.forEach((pi, k) => {
       const p = res.pieces[pi];
       if (k > 0 && model.kerf > 0) segs.push('<div class="seg seg-kerf"></div>');
-      segs.push(`<div class="seg seg-cut c${c}" style="flex-grow:${p.length}" title="${p.label}: ${fmtFtIn(p.length)}"><div class="piece">${p.label} · ${fmtFtIn(p.length)}</div></div>`);
+      const text = many ? fmtFtIn(p.length) : `${p.label} · ${fmtFtIn(p.length)}`;
+      segs.push(`<div class="seg seg-cut c${c}" style="flex-grow:${p.length}" title="${fmtFtIn(p.length)}"><div class="piece">${text}</div></div>`);
     });
     if (b.waste > 0.01) segs.push(`<div class="seg seg-left" style="flex-grow:${b.waste}" title="offcut ${fmtFtIn(b.waste)}">${fmtFtIn(b.waste)}</div>`);
-    return `<div class="board" data-bin="${bi}"><div class="board-title"><strong>#${bi + 1}</strong> · ${fmtFtIn(b.stock.length)} board</div>` +
-      `<div class="bar">${segs.join('')}</div></div>`;
+    const nums = bis.map((bi) => `#${bi + 1}`).join(', ');
+    const pieces = many
+      ? `<div class="board-caption">${bis.map((bi) => `<button type="button" class="btn-link" data-bin="${bi}">#${bi + 1}: ${res.bins[bi].cuts.map((pi) => res.pieces[pi].label).join(' + ')}</button>`).join(' ')}</div>`
+      : '';
+    return `<div class="board" data-bin="${bis[0]}"><div class="board-title"><strong>${nums}</strong> · ${fmtFtIn(b.stock.length)} board${many ? ` <span class="mult">× ${bis.length}</span>` : ''}</div>` +
+      `<div class="bar">${segs.join('')}</div>${pieces}</div>`;
   }).join('');
 
   const bw = model.boardWidth;
@@ -1065,7 +1112,7 @@ function showPiece(pi) {
   scheduleDraw();
 }
 $('dCutPlan').addEventListener('click', (e) => {
-  const el = e.target.closest('.board');
+  const el = e.target.closest('[data-bin]');
   if (!el || !results) return;
   selBin = Number(el.dataset.bin);
   $('dPieceInfo').hidden = true;
@@ -1077,6 +1124,41 @@ $('dPieces').addEventListener('click', (e) => {
   if (!tr || !results) return;
   showPiece(Number(tr.dataset.piece));
   $('dLayoutCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// A deck lived only in this browser's storage; a file can be kept, moved to
+// another device, or sent to whoever is building it.
+$('dExport').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify({ app: 'deck-planner', version: 1, ...state }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `deck-${U.localDate()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$('dImport').addEventListener('click', () => $('dFile').click());
+$('dFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let d = null;
+  try { d = JSON.parse(await file.text()); } catch { /* reported below */ }
+  if (!d || d.app !== 'deck-planner' || !Array.isArray(d.footprints) || !Array.isArray(d.stock)) {
+    showErrors(["That isn't a deck file saved from this planner."]);
+    return;
+  }
+  if (state.footprints.length && !confirm('Replace the current deck with the one in the file?')) return;
+  localStorage.setItem(KEY, JSON.stringify(d));
+  state = load();
+  if (!fpById(state.active)) state.active = state.footprints.length ? state.footprints[0].id : null;
+  for (const [k, id] of Object.entries(SETTING_INPUTS)) $(id).value = state.settings[k];
+  $('dSnap').value = String(state.snap);
+  sel = null; drawing = []; joistStart = null;
+  renderStock(); renderChips(); renderAreaCard(); renderActions();
+  touch();
+  fit();
 });
 
 $('dClear').addEventListener('click', () => {
